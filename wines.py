@@ -302,12 +302,8 @@ DTC(X_train,y_train,X_test,y_test)
 from sklearn.neighbors import KNeighborsClassifier
 
 def KNN(X_train,y_train,X_test,y_test):
-    knn = KNeighborsClassifier(n_neighbors=8)
-    predictions = knn.fit(X_train, y_train).predict(X_test)
-    accuracy = accuracy_score(y_test, predictions)
-    
+    knn = KNeighborsClassifier(n_neighbors=8)   
     knn.fit(X_train,y_train)
-    
     knn_pred = knn.predict(X_test)
     
     mse_knn = MSE(y_test, knn_pred)
@@ -514,68 +510,84 @@ there are circa 6 times more low quality wines than high
 So the double Winning GradientBoostingClassifier is a go to there/
 """
 
+from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
+
+
+X, y = attributes, features
+
+model = GradientBoostingClassifier()
+default_params = model.get_params()
+print(default_params)#aby wiedziec co mozna zmieniac, pozniej i tak musialem czytac dokumentacje, aby wiedziec co jest czym..
+#%%
+#LICZY OKOLO GODZINE, poniezej moje wyniki, 
+#nie skorzystalem z grid search, ponieważ za duza 'mapa' parametrow
+#i szukanie trwaloby wiele lat
+parameters = {
+    "loss":["deviance"],
+    "learning_rate": [0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2],
+    "min_samples_split": np.linspace(0.1, 0.5, 12),
+    "min_samples_leaf": np.linspace(0.1, 0.5, 12),
+    "max_depth":[3,5,8],
+    "max_features":["log2","sqrt"],
+    "criterion": ["friedman_mse",  "mae"],
+    "subsample":[0.5, 0.608, 0.8, 0.85, 0.9, 0.95, 1.0],
+    "n_estimators":[10,100,1000,10000]
+    }
+
+number_combinations = 1
+for i in parameters:
+    number_combinations *= len(i)
+
+
+cv_random = RandomizedSearchCV(estimator = GradientBoostingClassifier(),
+        param_distributions=parameters, n_iter=100,
+        scoring='f1',
+        n_jobs=-1,
+        refit=True,
+        cv=10, verbose=1,
+        return_train_score=True)
+    
+search = cv_random.fit(X_train,y_train)
+
+best_score = search.best_score_
+best_params = search.best_params_
+
+'''
+best_scorew = 0.9457450478391032
+best_paramsw = {'subsample': 1.0, 
+                'n_estimators': 1000,
+                'min_samples_split': 0.2090909090909091,
+                'min_samples_leaf': 0.1, 
+                'max_features': 'log2', 
+                'max_depth': 5, 
+                'loss': 'deviance', 
+                'learning_rate': 0.1, 
+                'criterion': 'friedman_mse'}
+'''
+"""
+    1000 fits is about 44 minutes,
+    1000/4cores*10sec(per_model)*60
+"""
+#%%
+
+print(search.best_score_)
+print(search.best_params_)
 
 
 #%%
-
-from sklearn.model_selection import KFold,cross_val_score
-from sklearn.model_selection import RandomizedSearchCV,GridSearchCV,
-
-learn_rate_list = np.linspace(0.001,2,150)
-min_samples_leaf_list = list(range(1,51))
-
-parameter_grid = {
-    'learning_rate' : learn_rate_list,
-    'min_samples_leaf' : min_samples_leaf_list}
-
-number_models = 10
-
-random_GBC = RandomizedSearchCV(estimator = GradientBoostingClassifier(),
-    param_distributions=parameter_grid, n_iter=number_models,
-    scoring='f1',
-    n_jobs=4,
-    refit=True,
-    cv=10, verbose=0,
-    return_train_score=True)
-
-
-random_GBC.fit(X_train,y_train)
-#%%
-
-rand_x = list(random_GBC.cv_results_['param_learning_rate'])
-rand_y = list(random_GBC.cv_results_['param_min_samples_leaf'])
-
-
-x_lims = [np.min(learn_rate_list), np.max(learn_rate_list)]
-y_lims = [np.min(min_samples_leaf_list), np.max(min_samples_leaf_list)]
-
-
-plt.scatter(rand_y, rand_x, c=['blue']*10)
-plt.gca().set(xlabel='learn_rate', ylabel='min_samples_leaf',
-title='Random Search Hyperparameters')
-plt.show()
-
-print(random_GBC.best_estimator_)
-
-
-'''as grid search cv is very costly, i will first use random search,
-then on a few of the best result I will perform grid search to,
-extract the best of them.'''
-
-
-from sklearn.model_selection import validation_curve
+from sklearn.model_selection import  learning_curve, validation_curve
 
 #plots generated as here -> https://chrisalbon.com/machine_learning/model_evaluation/plot_the_validation_curve/
 
 param_range=np.arange(1,250,2)
 
 train_scores, val_scores = validation_curve(
-    GradientBoostingClassifier(), 
+    GradientBoostingClassifier().set_params(**best_params), 
     attributes, features,
     param_name='n_estimators',
     param_range=param_range,
     cv = 10,
-    scoring='accuracy',
+    scoring='f1',
     n_jobs=-1)
 
 
@@ -594,221 +606,139 @@ plt.fill_between(param_range, val_mean - val_std, val_mean + val_std, color="gai
 
 plt.title("Validation Curve With Random Forest")
 plt.xlabel("Number Of Trees")
-plt.ylabel("Accuracy Score")
+plt.ylabel("f1 Score")
 plt.tight_layout()
 plt.legend(loc="best")
+plt.savefig(os.path.join(KATALOG_WYKRESOW,'validation_curve.jpg'), dpi=300 )
 plt.show()
+
+''' Widac ze dla duzej ilosci drzew model zayczna byc zbyt dobrze dopasowany 
+do zbioru treningowego
+'''
+
+
+#dorobic learning curve pojedyncza
 #%%
+train_sizes, train_scores, test_scores =\
+    learning_curve(GradientBoostingClassifier().set_params(**best_params), 
+                   X, y,
+                   cv=10,
+                   scoring='f1',
+                   n_jobs=-1, 
+                   train_sizes=np.linspace(0.01, 1.0, 50))
 
-from sklearn.model_selection import ShuffleSplit, learning_curve
+# Create means and standard deviations of training set scores
+train_mean = np.mean(train_scores, axis=1)
+train_std = np.std(train_scores, axis=1)
 
-#https://scikit-learn.org/stable/auto_examples/model_selection/plot_learning_curve.html#sphx-glr-auto-examples-model-selection-plot-learning-curve-py
+# Create means and standard deviations of test set scores
+test_mean = np.mean(test_scores, axis=1)
+test_std = np.std(test_scores, axis=1)
 
-def plot_learning_curve(estimator, title, X, y, axes=None, ylim=None, cv=None,
-                        n_jobs=None, train_sizes=np.linspace(.1, 1.0, 5)):
-    """
-    Generate 3 plots: the test and training learning curve, the training
-    samples vs fit times curve, the fit times vs score curve.
+# Draw lines
+plt.plot(train_sizes, train_mean, '--', color="#111111",  label="Training score")
+plt.plot(train_sizes, test_mean, color="#111111", label="Cross-validation score")
 
-    Parameters
-    ----------
-    estimator : object type that implements the "fit" and "predict" methods
-        An object of that type which is cloned for each validation.
+# Draw bands
+plt.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, color="#DDDDDD")
+plt.fill_between(train_sizes, test_mean - test_std, test_mean + test_std, color="#DDDDDD")
 
-    title : string
-        Title for the chart.
-
-    X : array-like, shape (n_samples, n_features)
-        Training vector, where n_samples is the number of samples and
-        n_features is the number of features.
-
-    y : array-like, shape (n_samples) or (n_samples, n_features), optional
-        Target relative to X for classification or regression;
-        None for unsupervised learning.
-
-    axes : array of 3 axes, optional (default=None)
-        Axes to use for plotting the curves.
-
-    ylim : tuple, shape (ymin, ymax), optional
-        Defines minimum and maximum yvalues plotted.
-
-    cv : int, cross-validation generator or an iterable, optional
-        Determines the cross-validation splitting strategy.
-        Possible inputs for cv are:
-
-          - None, to use the default 5-fold cross-validation,
-          - integer, to specify the number of folds.
-          - :term:`CV splitter`,
-          - An iterable yielding (train, test) splits as arrays of indices.
-
-        For integer/None inputs, if ``y`` is binary or multiclass,
-        :class:`StratifiedKFold` used. If the estimator is not a classifier
-        or if ``y`` is neither binary nor multiclass, :class:`KFold` is used.
-
-        Refer :ref:`User Guide <cross_validation>` for the various
-        cross-validators that can be used here.
-
-    n_jobs : int or None, optional (default=None)
-        Number of jobs to run in parallel.
-        ``None`` means 1 unless in a :obj:`joblib.parallel_backend` context.
-        ``-1`` means using all processors. See :term:`Glossary <n_jobs>`
-        for more details.
-
-    train_sizes : array-like, shape (n_ticks,), dtype float or int
-        Relative or absolute numbers of training examples that will be used to
-        generate the learning curve. If the dtype is float, it is regarded as a
-        fraction of the maximum size of the training set (that is determined
-        by the selected validation method), i.e. it has to be within (0, 1].
-        Otherwise it is interpreted as absolute sizes of the training sets.
-        Note that for classification the number of samples usually have to
-        be big enough to contain at least one sample from each class.
-        (default: np.linspace(0.1, 1.0, 5))
-    """
-    if axes is None:
-        _, axes = plt.subplots(1, 3, figsize=(20, 5))
-
-    axes[0].set_title(title)
-    if ylim is not None:
-        axes[0].set_ylim(*ylim)
-    axes[0].set_xlabel("Training examples")
-    axes[0].set_ylabel("Score")
-
-    train_sizes, train_scores, test_scores, fit_times, _ = \
-        learning_curve(estimator, X, y, cv=cv, n_jobs=n_jobs,
-                       train_sizes=train_sizes,
-                       return_times=True)
-    train_scores_mean = np.mean(train_scores, axis=1)
-    train_scores_std = np.std(train_scores, axis=1)
-    test_scores_mean = np.mean(test_scores, axis=1)
-    test_scores_std = np.std(test_scores, axis=1)
-    fit_times_mean = np.mean(fit_times, axis=1)
-    fit_times_std = np.std(fit_times, axis=1)
-
-    # Plot learning curve
-    axes[0].grid()
-    axes[0].fill_between(train_sizes, train_scores_mean - train_scores_std,
-                         train_scores_mean + train_scores_std, alpha=0.1,
-                         color="r")
-    axes[0].fill_between(train_sizes, test_scores_mean - test_scores_std,
-                         test_scores_mean + test_scores_std, alpha=0.1,
-                         color="g")
-    axes[0].plot(train_sizes, train_scores_mean, 'o-', color="r",
-                 label="Training score")
-    axes[0].plot(train_sizes, test_scores_mean, 'o-', color="g",
-                 label="Cross-validation score")
-    axes[0].legend(loc="best")
-
-    # Plot n_samples vs fit_times
-    axes[1].grid()
-    axes[1].plot(train_sizes, fit_times_mean, 'o-')
-    axes[1].fill_between(train_sizes, fit_times_mean - fit_times_std,
-                         fit_times_mean + fit_times_std, alpha=0.1)
-    axes[1].set_xlabel("Training examples")
-    axes[1].set_ylabel("fit_times")
-    axes[1].set_title("Scalability of the model")
-
-    # Plot fit_time vs score
-    axes[2].grid()
-    axes[2].plot(fit_times_mean, test_scores_mean, 'o-')
-    axes[2].fill_between(fit_times_mean, test_scores_mean - test_scores_std,
-                         test_scores_mean + test_scores_std, alpha=0.1)
-    axes[2].set_xlabel("fit_times")
-    axes[2].set_ylabel("Score")
-    axes[2].set_title("Performance of the model")
-
-    return plt
-
-
-fig, axes = plt.subplots(3, 2, figsize=(10, 15))
-
-X, y = attributes, features
-
-title = "Learning Curves (n_estimators=100)"
-# Cross validation with 100 iterations to get smoother mean test and train
-# score curves, each time with 20% data randomly selected as a validation set.
-cv = ShuffleSplit(n_splits=100, test_size=0.2, random_state=0)
-
-estimator = GradientBoostingClassifier()
-plot_learning_curve(estimator, title, X, y, axes=axes[:, 0], ylim=(0.7, 1.01),
-                    cv=cv, n_jobs=4)
-
-title = r"Learning Curves (n_estimators=500)"
-#
-estimator = GradientBoostingClassifier(n_estimators=500)
-plot_learning_curve(estimator, title, X, y, axes=axes[:, 1], ylim=(0.7, 1.01),
-                    cv=cv, n_jobs=4)
-
+# Create plot
+plt.title("Learning Curve")
+plt.xlabel("Training Set Size"), plt.ylabel("f1 Score"), plt.legend(loc="best")
+plt.tight_layout()
+plt.savefig(os.path.join(KATALOG_WYKRESOW,'learning_curve.jpg'), dpi=300 )
 plt.show()
 
 
-
-#%%
-def model_fit_validate_search(model, X, y, cv_folds=10):
-    model.fit(X,y)
-    
-    train_pred  = model.predict(X)
-    train_proba = model.predict_proba(X)
-    
-    
-    cv_score = cross_val_score(model, X, y, cv = cv_folds, scoring='accuracy')
-    
-    print(f"")
-    print(cv_score)
-    
-    wdc = pd.Series(model.feature_importances_[:-1],wines.columns[:-2]).sort_values()
-    
-    wdc.plot(kind='bar')
-    plt.ylabel('importance score')
-
-
-model_fit_validate_search(GradientBoostingClassifier(), X,y)
-
 #%%
 
 
 
 
+gbcc = GradientBoostingClassifier().set_params(**best_params)
+    
+gbcc.fit(X_train,y_train)
+gbc_pred = gbcc.predict(X_test)
+    
+mse_gbc= MSE(y_test, gbc_pred)
+rmse_gbc= mse_gbc**(1/2)
+    
+print('GradientBoostingClassifier')
+print(classification_report(y_test, gbc_pred))
+print(f'accurracy= {accuracy_score(y_test, gbc_pred):.4f}')
+print(f'mse = {mse_gbc:.4f}')
+print(f'rmse = {rmse_gbc:.4f}')
+print('*'*70)
+
+from sklearn.metrics import roc_auc_score
+
+print(roc_auc_score(y_test, gbc_pred))
 
 
 
+#%%
+from sklearn.model_selection import cross_val_score
+
+
+scoresgbc = cross_val_score(gbcc, 
+                            X_train, y_train, 
+                            scoring=None, 
+                            cv=10,
+                            n_jobs=-1)
 
 
 
+print(f'cross validation score: {scoresgbc.mean():.4f}')
+
+print(f'Accuracy: {np.mean(scoresgbc):.4f},  std: {np.std(scoresgbc):.4f}')
+
+y_pred_train = gbcc.predict(X_train)
+acc_train = accuracy_score(y_train, y_pred_train)
+print(f'accuracy on training set: {acc_train:.4f}')
+
+y_pred_test = gbcc.predict(X_test)
+acc_test = accuracy_score(y_test, y_pred_test)
+print(f'accuracy on test set: {acc_test:.4f}\n')
+
+print(classification_report(y_test, y_pred_test))
 
 
+from sklearn.metrics import confusion_matrix
+
+print(confusion_matrix(y_test,y_pred_test))
+
+tn, fp, fn, tp = confusion_matrix(y_test, y_pred_test).ravel()
 
 
+#%%
+#at last lets get confusion matrix plot
+from sklearn.metrics import plot_confusion_matrix
 
+labels=['true negatives','false positives','false negatives','true positives']
 
+disp = plot_confusion_matrix(gbcc, X_test, y_test,
+                             cmap=plt.cm.Blues,
+                             normalize='all')
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+disp.ax_.set_title('normalized confusion matrix plot')
+print(disp.confusion_matrix)
+plt.show()
+    
+    
+'''So I ended up with accuracy on the test set of 0.9281,
+ and cv score of 0.9424(f1), and 0.8991(accuracy)
+got 0.85 of true positives(271) which is not bad 
+considering small size of data,
+it seems that algorithm has efficiently learned,
+which are the best chemical traits, to select a good wine,
+what a shame they don't put those on wine labels...
+maybe, next step, -> indentify wine by etiquette ->
+connect with database of those chemical properties,
+-> return answer.
+'''    
+    
+    
+    
 
 
